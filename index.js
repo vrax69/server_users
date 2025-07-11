@@ -8,6 +8,8 @@ const authMiddleware = require('./middleware/authMiddleware');
 const app = express();
 app.use(cors());
 app.use(express.json());
+const cookieParser = require('cookie-parser');
+app.use(cookieParser());
 
 // Pool de conexiones (mejor práctica)
 const pool = mysql.createPool({
@@ -20,7 +22,7 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
-app.get('/api/usuarios', async (req, res) => {
+app.get('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
   try {
     const search = req.query.search || '';
     const page = parseInt(req.query.page) || 1;
