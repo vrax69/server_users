@@ -1,7 +1,7 @@
 // middleware/authMiddleware.js
-import jwt from "jsonwebtoken";
+const jwt = require("jsonwebtoken");
 
-export const verifyToken = (req, res, next) => {
+function verifyToken(req, res, next) {
   const token = req.cookies.token;
   if (!token) return res.status(401).json({ message: "Token faltante" });
 
@@ -12,4 +12,6 @@ export const verifyToken = (req, res, next) => {
   } catch (error) {
     res.status(403).json({ message: "Token inválido" });
   }
-};
+}
+
+module.exports = { verifyToken };
