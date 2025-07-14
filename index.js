@@ -2,14 +2,29 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
+const cookieParser = require('cookie-parser'); // <-- PRIMERO
 const authMiddleware = require('./middleware/authMiddleware');
 
-
 const app = express();
-app.use(cors());
-app.use(express.json());
-const cookieParser = require('cookie-parser');
+
+// 1. CORS
+app.use(cors({
+  origin: process.env.FRONTEND_ORIGIN,    // Solo uno, sin espacios, sin slash final
+  credentials: true,
+}));
+
+// 2. Cookies
 app.use(cookieParser());
+
+// 3. JSON
+app.use(express.json());
+
+// 4. Log para debug (opcional)
+app.use((req, res, next) => {
+  console.log("🌍 Origin:", req.headers.origin);
+  console.log("🍪 Cookies recibidas:", req.cookies);
+  next();
+});
 
 // Pool de conexiones (mejor práctica)
 const pool = mysql.createPool({
