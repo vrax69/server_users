@@ -70,6 +70,68 @@ app.get('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
   }
 });
 
+// AGREGAR USUARIO (POST)
+app.post('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
+  try {
+    const {
+      nombre,
+      email,
+      rol,
+      centro,
+      password,
+      'STATUS OF AGENT': status,
+      'NEXT VOLT': nextVolt,
+      RUSHMORE,
+      INDRA,
+      APGE,
+      CLEANSKY,
+      WGL,
+      NGE,
+      'SPARK AUTO': sparkAuto,
+      'SPARK LIVE': sparkLive,
+      ECOPLUS,
+    } = req.body;
+
+    // Validar campos obligatorios
+    if (!nombre || !email || !rol || !centro || !password) {
+      return res.status(400).json({ error: 'Faltan datos obligatorios' });
+    }
+
+    // INSERT
+    await pool.query(
+      `INSERT INTO usuarios
+        (nombre, email, rol, centro, password, creado_en,
+         \`STATUS OF AGENT\`, \`NEXT VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
+         WGL, NGE, \`SPARK AUTO\`, \`SPARK LIVE\`, ECOPLUS)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        nombre,
+        email,
+        rol,
+        centro,
+        password,
+        new Date().toISOString().slice(0, 19).replace('T', ' '), // Formato de fecha: yyyy-mm-dd HH:MM:SS
+        status || '',
+        nextVolt || '',
+        RUSHMORE || '',
+        INDRA || '',
+        APGE || '',
+        CLEANSKY || '',
+        WGL || '',
+        NGE || '',
+        sparkAuto || '',
+        sparkLive || '',
+        ECOPLUS || '',
+      ]
+    );
+
+    res.json({ ok: true, message: 'Usuario agregado correctamente' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al agregar usuario' });
+  }
+});
+
 const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`API usuarios corriendo en http://localhost:${PORT}`);
