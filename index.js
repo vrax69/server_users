@@ -79,16 +79,16 @@ app.post('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
       rol,
       centro,
       password,
-      'STATUS OF AGENT': status,
-      'NEXT VOLT': nextVolt,
+      'STATUS_OF_AGENT': status,
+      'NEXT_VOLT': nextVolt,
       RUSHMORE,
       INDRA,
       APGE,
       CLEANSKY,
       WGL,
       NGE,
-      'SPARK AUTO': sparkAuto,
-      'SPARK LIVE': sparkLive,
+      'SPARK_AUTO': sparkAuto,
+      'SPARK_LIVE': sparkLive,
       ECOPLUS,
     } = req.body;
 
@@ -101,8 +101,8 @@ app.post('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
     await pool.query(
       `INSERT INTO usuarios
         (nombre, email, rol, centro, password, creado_en,
-         \`STATUS OF AGENT\`, \`NEXT VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
-         WGL, NGE, \`SPARK AUTO\`, \`SPARK LIVE\`, ECOPLUS)
+         \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
+         WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         nombre,
