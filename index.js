@@ -53,8 +53,8 @@ app.get('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT id, nombre, email, rol, centro, creado_en,
-        \`STATUS OF AGENT\`, \`NEXT VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
-        WGL, NGE, \`SPARK AUTO\`, \`SPARK LIVE\`, ECOPLUS
+        \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
+        WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS
        FROM usuarios ${where} LIMIT ? OFFSET ?`,
       [...params, pageSize, offset]
     );
