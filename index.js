@@ -132,6 +132,99 @@ app.post('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
   }
 });
 
+// OBTENER USUARIO POR ID (GET)
+app.get('/api/usuarios/:id', authMiddleware.verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const [rows] = await pool.query(
+      `SELECT id, nombre, email, rol, centro, creado_en,
+        \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
+        WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS
+       FROM usuarios WHERE id = ?`,
+      [id]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error al obtener usuario:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ACTUALIZAR USUARIO (PUT)
+app.put('/api/usuarios/:id', authMiddleware.verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    // Construir la consulta SQL dinámicamente
+    const fields = [];
+    const values = [];
+    
+    // Campos que se pueden actualizar
+    const allowedFields = [
+      'nombre', 'email', 'rol', 'centro', 'password', 
+      'STATUS_OF_AGENT', 'NEXT_VOLT', 'RUSHMORE', 'INDRA', 
+      'APGE', 'CLEANSKY', 'WGL', 'NGE', 'SPARK_AUTO', 
+      'SPARK_LIVE', 'ECOPLUS'
+    ];
+    
+    // Iterar sobre los campos permitidos
+    allowedFields.forEach(field => {
+      if (updateData.hasOwnProperty(field) && updateData[field] !== undefined) {
+        // Manejar campos con backticks
+        if (['STATUS_OF_AGENT', 'NEXT_VOLT', 'SPARK_AUTO', 'SPARK_LIVE'].includes(field)) {
+          fields.push(`\`${field}\` = ?`);
+        } else {
+          fields.push(`${field} = ?`);
+        }
+        values.push(updateData[field]);
+      }
+    });
+    
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No hay campos para actualizar' });
+    }
+    
+    // Añadir el ID al final para la cláusula WHERE
+    values.push(id);
+    
+    // Construir la consulta
+    const query = `UPDATE usuarios SET ${fields.join(', ')} WHERE id = ?`;
+    
+    // Ejecutar la consulta
+    const [result] = await pool.query(query, values);
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    
+    // Obtener el usuario actualizado
+    const [updatedUser] = await pool.query(
+      `SELECT id, nombre, email, rol, centro, creado_en,
+        \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
+        WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS
+       FROM usuarios WHERE id = ?`,
+      [id]
+    );
+    
+    res.json({
+      ok: true,
+      message: 'Usuario actualizado exitosamente',
+      usuario: updatedUser[0]
+    });
+    
+  } catch (error) {
+    console.error('Error al actualizar usuario:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`API usuarios corriendo en http://localhost:${PORT}`);
