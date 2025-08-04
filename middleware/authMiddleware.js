@@ -1,8 +1,19 @@
 // middleware/authMiddleware.js
-import jwt from "jsonwebtoken";
-import { db } from "../config.js";
+const jwt = require('jsonwebtoken');
+const mysql = require('mysql2/promise');
 
-export const verifyToken = async (req, res, next) => {
+// Crear pool de conexiones aquí también o recibirlo como parámetro
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD, 
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
+
+const verifyToken = async (req, res, next) => {
   const token = req.cookies.token;
   
   if (!token) {
@@ -16,7 +27,7 @@ export const verifyToken = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Verificar si el usuario existe y está activo en la base de datos
-    const [userRows] = await db.execute(
+    const [userRows] = await pool.execute(
       'SELECT id, nombre, email, rol, centro, STATUS_OF_AGENT FROM usuarios WHERE id = ?',
       [decoded.id]
     );
@@ -65,4 +76,8 @@ export const verifyToken = async (req, res, next) => {
       code: "INVALID_TOKEN" 
     });
   }
+};
+
+module.exports = {
+  verifyToken
 };
