@@ -42,28 +42,52 @@ const pool = mysql.createPool({
 app.get('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
   try {
     const search = req.query.search || '';
+    const centro = req.query.centro || '';
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
     const offset = (page - 1) * pageSize;
 
+    // Debug: ver qué parámetros está recibiendo el backend
+    console.log('Backend recibió parámetros:', { search, centro, page, pageSize });
+
     let where = '';
     let params = [];
+    
+    // Construir condiciones WHERE
+    const conditions = [];
+    
     if (search) {
-      where = `WHERE nombre LIKE ? OR email LIKE ? OR centro LIKE ?`;
-      params = [`%${search}%`, `%${search}%`, `%${search}%`];
+      conditions.push(`(nombre LIKE ? OR email LIKE ? OR centro LIKE ?)`);
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    
+    if (centro) {
+      conditions.push(`centro = ?`);
+      params.push(centro);
+    }
+    
+    if (conditions.length > 0) {
+      where = `WHERE ${conditions.join(' AND ')}`;
     }
 
-    const [rows] = await pool.query(
-      `SELECT id, nombre, email, rol, centro, creado_en,
+    const query = `SELECT id, nombre, email, rol, centro, creado_en,
         \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
         WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS
-       FROM usuarios ${where} LIMIT ? OFFSET ?`,
-      [...params, pageSize, offset]
-    );
+       FROM usuarios ${where} LIMIT ? OFFSET ?`;
+    
+    const queryParams = [...params, pageSize, offset];
+    
+    // Debug: ver la query y parámetros
+    console.log('Query SQL:', query);
+    console.log('Parámetros SQL:', queryParams);
 
-    const [[{ total }]] = await pool.query(
-      `SELECT COUNT(*) as total FROM usuarios ${where}`, params
-    );
+    const [rows] = await pool.query(query, queryParams);
+
+    const countQuery = `SELECT COUNT(*) as total FROM usuarios ${where}`;
+    console.log('Count Query:', countQuery);
+    console.log('Count Params:', params);
+    
+    const [[{ total }]] = await pool.query(countQuery, params);
 
     res.json({ usuarios: rows, total });
   } catch (error) {
