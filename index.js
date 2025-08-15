@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: ['.env.local', '.env'] });
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -6,6 +6,21 @@ const cookieParser = require('cookie-parser');
 const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
+
+// Debug de variables de entorno
+console.log('🔧 Variables de entorno cargadas:');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('SKIP_AUTH:', process.env.SKIP_AUTH);
+console.log('DB_HOST:', process.env.DB_HOST);
+console.log('DB_NAME:', process.env.DB_NAME);
+console.log('DB_USER:', process.env.DB_USER);
+console.log('DB_PASS:', process.env.DB_PASS ? '***' : 'NO DEFINIDO');
+
+// Middleware condicional para autenticación
+const requireAuth =
+  process.env.SKIP_AUTH === '1'
+    ? (_req, _res, next) => next()           // NO pide token (modo test)
+    : authMiddleware.verifyToken;            // modo normal
 
 // 1. CORS
 app.use(cors({
@@ -31,154 +46,211 @@ app.use((req, res, next) => {
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD, 
+  password: process.env.DB_PASS,  // Cambiar de DB_PASSWORD a DB_PASS
   database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
 });
 
+// Helper: obtener todos los proveedores
+async function getAllProviders(pool) {
+  const [rows] = await pool.query('SELECT id, codigo FROM proveedores ORDER BY codigo');
+  return rows; // [{id, codigo}, ...]
+}
+
 // GET - Obtener todos los usuarios
-app.get('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
+app.get('/api/usuarios', requireAuth, async (req, res) => {
   try {
+    console.log('🔍 Iniciando GET /api/usuarios');
+    
     const search = req.query.search || '';
     const centro = req.query.centro || '';
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
     const offset = (page - 1) * pageSize;
 
-    // Debug: ver qué parámetros está recibiendo el backend
-    console.log('Backend recibió parámetros:', { search, centro, page, pageSize });
+    console.log('📋 Parámetros recibidos:', { search, centro, page, pageSize });
 
-    let where = '';
-    let params = [];
-    
-    // Construir condiciones WHERE
+    // Verificar conexión primero
+    await pool.query('SELECT 1');
+    console.log('✅ Conexión DB OK');
+
+    // WHERE dinámico
     const conditions = [];
-    
+    const params = [];
     if (search) {
-      conditions.push(`(nombre LIKE ? OR email LIKE ? OR centro LIKE ?)`);
+      conditions.push(`(u.nombre LIKE ? OR u.email LIKE ? OR u.centro LIKE ?)`);
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
-    
     if (centro) {
-      conditions.push(`centro = ?`);
+      conditions.push(`u.centro = ?`);
       params.push(centro);
     }
-    
-    if (conditions.length > 0) {
-      where = `WHERE ${conditions.join(' AND ')}`;
-    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const query = `SELECT id, nombre, email, rol, centro, creado_en,
-        \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
-        WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS
-       FROM usuarios ${where} LIMIT ? OFFSET ?`;
-    
-    const queryParams = [...params, pageSize, offset];
-    
-    // Debug: ver la query y parámetros
-    console.log('Query SQL:', query);
-    console.log('Parámetros SQL:', queryParams);
-
-    const [rows] = await pool.query(query, queryParams);
-
-    const countQuery = `SELECT COUNT(*) as total FROM usuarios ${where}`;
-    console.log('Count Query:', countQuery);
-    console.log('Count Params:', params);
-    
-    const [[{ total }]] = await pool.query(countQuery, params);
-
-    res.json({ usuarios: rows, total });
-  } catch (error) {
-    console.error('Error en GET /api/usuarios:', error);
-    res.status(500).json({ error: "Error en el servidor" });
-  }
-});
-
-// POST - Agregar usuario
-app.post('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
-  try {
-    const {
-      nombre,
-      email,
-      rol,
-      centro,
-      password,
-      'STATUS_OF_AGENT': status,
-      'NEXT_VOLT': nextVolt,
-      RUSHMORE,
-      INDRA,
-      APGE,
-      CLEANSKY,
-      WGL,
-      NGE,
-      'SPARK_AUTO': sparkAuto,
-      'SPARK_LIVE': sparkLive,
-      ECOPLUS,
-    } = req.body;
-
-    // Validar campos obligatorios
-    if (!nombre || !email || !rol || !centro || !password) {
-      return res.status(400).json({ error: 'Faltan datos obligatorios' });
-    }
-
-    // INSERT
-    await pool.query(
-      `INSERT INTO usuarios
-        (nombre, email, rol, centro, password, creado_en,
-         \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
-         WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        nombre,
-        email,
-        rol,
-        centro,
-        password,
-        new Date().toISOString().slice(0, 19).replace('T', ' '),
-        status || '',
-        nextVolt || '',
-        RUSHMORE || '',
-        INDRA || '',
-        APGE || '',
-        CLEANSKY || '',
-        WGL || '',
-        NGE || '',
-        sparkAuto || '',
-        sparkLive || '',
-        ECOPLUS || '',
-      ]
+    // total
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total FROM usuarios u ${where}`,
+      params
     );
 
-    res.json({ ok: true, message: 'Usuario agregado correctamente' });
+    console.log('Total encontrado:', total);
+
+    // usuarios base (SIN STATUS_OF_AGENT - solo campos que existen)
+    const [users] = await pool.query(
+      `SELECT u.id, u.nombre, u.email, u.rol, u.centro, u.creado_en
+       FROM usuarios u
+       ${where}
+       ORDER BY u.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, pageSize, offset]
+    );
+
+    console.log('Usuarios base encontrados:', users.length);
+
+    if (users.length === 0) {
+      return res.json({ usuarios: [], total });
+    }
+
+    // proveedores (para construir las columnas)
+    const providers = await getAllProviders(pool);
+    const userIds = users.map(u => u.id);
+
+    console.log('Proveedores disponibles:', providers.map(p => p.codigo));
+
+    // todas las cuentas TPV de los usuarios en la página
+    const [accounts] = await pool.query(
+      `SELECT a.user_id, p.codigo,
+              a.tpv_id, a.tpv_username, a.tpv_password, a.status, a.updated_at
+       FROM user_provider_account a
+       JOIN proveedores p ON p.id = a.provider_id
+       WHERE a.user_id IN (${userIds.map(() => '?').join(',')})
+       ORDER BY p.codigo`,
+      userIds
+    );
+
+    console.log('Cuentas TPV encontradas:', accounts.length);
+
+    // indexar accounts por user_id
+    const accByUser = new Map();
+    for (const row of accounts) {
+      if (!accByUser.has(row.user_id)) accByUser.set(row.user_id, []);
+      accByUser.get(row.user_id).push(row);
+    }
+
+    // construir salida: usuario base + columnas por proveedor
+    const usuariosOut = users.map(u => {
+      const base = {
+        id: u.id,
+        nombre: u.nombre,
+        email: u.email,
+        rol: u.rol,
+        centro: u.centro,
+        creado_en: u.creado_en,
+        STATUS_OF_AGENT: null  // Mantener para compatibilidad con frontend
+      };
+
+      // inicializa todas las columnas por proveedor
+      for (const p of providers) {
+        base[p.codigo] = null;
+        base[`${p.codigo}_STATUS`] = null;
+        base[`${p.codigo}_USERNAME`] = null;
+        base[`${p.codigo}_PASSWORD`] = null;
+      }
+
+      // rellena con lo que haya en cuentas
+      const rows = accByUser.get(u.id) || [];
+      for (const r of rows) {
+        base[r.codigo] = r.tpv_id || null;
+        base[`${r.codigo}_STATUS`] = r.status || null;
+        base[`${r.codigo}_USERNAME`] = r.tpv_username || null;
+        base[`${r.codigo}_PASSWORD`] = r.tpv_password || null;
+      }
+
+      return base;
+    });
+
+    console.log('Respuesta final generada para', usuariosOut.length, 'usuarios');
+    res.json({ usuarios: usuariosOut, total });
   } catch (error) {
-    console.error('Error en POST /api/usuarios:', error);
-    res.status(500).json({ error: 'Error al agregar usuario' });
+    console.error('❌ Error completo en GET /api/usuarios:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ 
+      error: "Error en el servidor",
+      details: error.message,
+      code: error.code 
+    });
   }
 });
 
 // GET - Obtener usuario por ID
-app.get('/api/usuarios/:id', authMiddleware.verifyToken, async (req, res) => {
+app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    console.log('🔍 Iniciando GET /api/usuarios/:id');
     
-    const [rows] = await pool.query(
-      `SELECT id, nombre, email, rol, centro, creado_en,
-        \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
-        WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS
-       FROM usuarios WHERE id = ?`,
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    console.log('🆔 Buscando usuario ID:', id);
+
+    // Verificar conexión primero
+    await pool.query('SELECT 1');
+    console.log('✅ Conexión DB OK');
+
+    const [[u]] = await pool.query(
+      `SELECT id, nombre, email, rol, centro, creado_en
+       FROM usuarios WHERE id = ? LIMIT 1`,
       [id]
     );
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (!u) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const providers = await getAllProviders(pool);
+
+    const [rows] = await pool.query(
+      `SELECT p.codigo, a.tpv_id, a.tpv_username, a.tpv_password, a.status
+       FROM user_provider_account a
+       JOIN proveedores p ON p.id = a.provider_id
+       WHERE a.user_id = ?`,
+      [id]
+    );
+
+    // arma salida pivot
+    const out = {
+      id: u.id,
+      nombre: u.nombre,
+      email: u.email,
+      rol: u.rol,
+      centro: u.centro,
+      creado_en: u.creado_en,
+      STATUS_OF_AGENT: null  // Mantener para compatibilidad con frontend
+    };
+
+    for (const p of providers) {
+      out[p.codigo] = null;
+      out[`${p.codigo}_STATUS`] = null;
+      out[`${p.codigo}_USERNAME`] = null;
+      out[`${p.codigo}_PASSWORD`] = null;
     }
-    
-    res.json(rows[0]);
+
+    for (const r of rows) {
+      out[r.codigo] = r.tpv_id || null;
+      out[`${r.codigo}_STATUS`] = r.status || null;
+      out[`${r.codigo}_USERNAME`] = r.tpv_username || null;
+      out[`${r.codigo}_PASSWORD`] = r.tpv_password || null;
+    }
+
+    res.json(out);
   } catch (error) {
-    console.error('Error en GET /api/usuarios/:id:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error('❌ Error completo en GET /api/usuarios/:id:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ 
+      error: 'Error interno del servidor',
+      details: error.message,
+      code: error.code 
+    });
   }
 });
 
@@ -305,6 +377,17 @@ app.delete('/api/usuarios/:id', authMiddleware.verifyToken, async (req, res) => 
   }
 });
 
+// Ruta de salud rápida (para ver que el server y la BD responden)
+app.get('/health', async (_req, res) => {
+  try {
+    const [r] = await pool.query('SELECT DATABASE() db, 1 ping');
+    res.json(r[0]);
+  } catch (e) {
+    console.error('HEALTH ERROR:', e);
+    res.status(500).json({ error: e.code || 'DB_ERROR', msg: e.message });
+  }
+});
+
 // Helper: resolver provider_id por code
 async function getProviderIdByCode(pool, code) {
   const [rows] = await pool.query(
@@ -315,7 +398,7 @@ async function getProviderIdByCode(pool, code) {
 }
 
 // GET - Todas las cuentas TPV de un usuario
-app.get('/api/usuarios/:userId/providers', authMiddleware.verifyToken, async (req, res) => {
+app.get('/api/usuarios/:userId/providers', requireAuth, async (req, res) => {
   try {
     const userId = Number(req.params.userId);
     if (!Number.isInteger(userId)) {
@@ -340,7 +423,7 @@ app.get('/api/usuarios/:userId/providers', authMiddleware.verifyToken, async (re
 });
 
 // GET - Una cuenta TPV específica (usuario + proveedor)
-app.get('/api/usuarios/:userId/providers/:code', authMiddleware.verifyToken, async (req, res) => {
+app.get('/api/usuarios/:userId/providers/:code', requireAuth, async (req, res) => {
   try {
     const userId = Number(req.params.userId);
     const code = String(req.params.code || '').trim();
@@ -368,7 +451,7 @@ app.get('/api/usuarios/:userId/providers/:code', authMiddleware.verifyToken, asy
 });
 
 // PUT - Crear/actualizar TPV ID + credenciales (UPSERT)
-app.put('/api/usuarios/:userId/providers/:code', authMiddleware.verifyToken, async (req, res) => {
+app.put('/api/usuarios/:userId/providers/:code', requireAuth, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const userId = Number(req.params.userId);
