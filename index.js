@@ -305,6 +305,120 @@ app.delete('/api/usuarios/:id', authMiddleware.verifyToken, async (req, res) => 
   }
 });
 
+// Helper: resolver provider_id por code
+async function getProviderIdByCode(pool, code) {
+  const [rows] = await pool.query(
+    'SELECT id FROM proveedores WHERE codigo = ? LIMIT 1',
+    [code]
+  );
+  return rows.length ? rows[0].id : null;
+}
+
+// GET - Todas las cuentas TPV de un usuario
+app.get('/api/usuarios/:userId/providers', authMiddleware.verifyToken, async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ error: 'userId inválido' });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT p.codigo AS code, p.nombre AS name,
+              a.tpv_id, a.tpv_username, a.status, a.updated_at
+       FROM user_provider_account a
+       JOIN proveedores p ON p.id = a.provider_id
+       WHERE a.user_id = ?
+       ORDER BY p.codigo`,
+      [userId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /usuarios/:userId/providers error', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// GET - Una cuenta TPV específica (usuario + proveedor)
+app.get('/api/usuarios/:userId/providers/:code', authMiddleware.verifyToken, async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const code = String(req.params.code || '').trim();
+
+    if (!Number.isInteger(userId) || !code) {
+      return res.status(400).json({ error: 'Parámetros inválidos' });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT p.codigo AS code, p.nombre AS name,
+              a.tpv_id, a.tpv_username, a.tpv_password, a.status, a.updated_at
+       FROM user_provider_account a
+       JOIN proveedores p ON p.id = a.provider_id
+       WHERE a.user_id = ? AND p.codigo = ?
+       LIMIT 1`,
+      [userId, code]
+    );
+
+    if (!rows.length) return res.status(404).json({ error: 'No existe cuenta TPV para ese proveedor' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('GET /usuarios/:userId/providers/:code error', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// PUT - Crear/actualizar TPV ID + credenciales (UPSERT)
+app.put('/api/usuarios/:userId/providers/:code', authMiddleware.verifyToken, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const userId = Number(req.params.userId);
+    const code = String(req.params.code || '').trim();
+    const { tpv_id, tpv_username, tpv_password, status } = req.body || {};
+
+    if (!Number.isInteger(userId) || !code || !tpv_id) {
+      return res.status(400).json({ error: 'userId/code/tpv_id obligatorios' });
+    }
+
+    const providerId = await getProviderIdByCode(pool, code);
+    if (!providerId) {
+      return res.status(404).json({ error: `Proveedor ${code} no existe` });
+    }
+
+    await conn.beginTransaction();
+
+    // PK(user_id, provider_id) → ON DUPLICATE KEY UPDATE hace UPSERT
+    const sql = `
+      INSERT INTO user_provider_account
+        (user_id, provider_id, tpv_id, tpv_username, tpv_password, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+        tpv_id = VALUES(tpv_id),
+        tpv_username = VALUES(tpv_username),
+        tpv_password = VALUES(tpv_password),
+        status = VALUES(status),
+        updated_at = NOW()
+    `;
+
+    await conn.query(sql, [
+      userId,
+      providerId,
+      tpv_id,
+      tpv_username || null,
+      tpv_password || null,
+      status || null
+    ]);
+
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    await (conn?.rollback?.());
+    console.error('PUT /usuarios/:userId/providers/:code error', err);
+    res.status(500).json({ error: 'Error interno' });
+  } finally {
+    conn.release();
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API usuarios corriendo en http://localhost:${PORT}`);
