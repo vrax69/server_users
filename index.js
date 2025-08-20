@@ -97,9 +97,9 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
 
     console.log('Total encontrado:', total);
 
-    // usuarios base (SIN STATUS_OF_AGENT - solo campos que existen)
+    // usuarios base (AHORA CON STATUS - incluir el campo status)
     const [users] = await pool.query(
-      `SELECT u.id, u.nombre, u.email, u.rol, u.centro, u.creado_en
+      `SELECT u.id, u.nombre, u.email, u.rol, u.centro, u.creado_en, u.status
        FROM usuarios u
        ${where}
        ORDER BY u.id DESC
@@ -148,7 +148,7 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
         rol: u.rol,
         centro: u.centro,
         creado_en: u.creado_en,
-        STATUS_OF_AGENT: null  // Mantener para compatibilidad con frontend
+        STATUS_OF_AGENT: u.status  // ← 🔥 Usar el campo real de la tabla
       };
 
       // inicializa todas las columnas por proveedor
@@ -201,7 +201,7 @@ app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
     console.log('✅ Conexión DB OK');
 
     const [[u]] = await pool.query(
-      `SELECT id, nombre, email, rol, centro, creado_en
+      `SELECT id, nombre, email, rol, centro, creado_en, status
        FROM usuarios WHERE id = ? LIMIT 1`,
       [id]
     );
@@ -225,7 +225,7 @@ app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
       rol: u.rol,
       centro: u.centro,
       creado_en: u.creado_en,
-      STATUS_OF_AGENT: null  // Mantener para compatibilidad con frontend
+      STATUS_OF_AGENT: u.status  // ← 🔥 Usar el campo real de la tabla
     };
 
     for (const p of providers) {
