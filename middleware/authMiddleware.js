@@ -37,7 +37,7 @@ const verifyToken = async (req, res, next) => {
     
     // Verificar si el usuario existe y está activo en la base de datos
     const [userRows] = await pool.execute(
-      'SELECT id, nombre, email, rol, centro, STATUS_OF_AGENT FROM usuarios WHERE id = ?',
+      'SELECT id, nombre, email, rol, centro, status FROM usuarios WHERE id = ?',
       [decoded.id]
     );
 
@@ -51,11 +51,11 @@ const verifyToken = async (req, res, next) => {
     const user = userRows[0];
 
     // Verificar si el usuario está activo
-    if (user.STATUS_OF_AGENT !== 'active') {
+    if (user.status !== 'active') {
       return res.status(403).json({ 
         message: "Cuenta inactiva. Contacta al administrador.", 
         code: "ACCOUNT_INACTIVE",
-        status: user.STATUS_OF_AGENT 
+        status: user.status 
       });
     }
 
@@ -66,7 +66,7 @@ const verifyToken = async (req, res, next) => {
       email: user.email,
       rol: user.rol,
       centro: user.centro,
-      status: user.STATUS_OF_AGENT
+      status: user.status
     };
     
     next();
