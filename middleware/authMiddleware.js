@@ -1,4 +1,13 @@
-// middleware/authMiddleware.js
+const dotenv = require('dotenv');
+const fs = require('fs');
+
+// ✅ Cargar archivo .env.local si existe, si no usar .env
+if (fs.existsSync('.env.local')) {
+  dotenv.config({ path: '.env.local' });
+} else {
+  dotenv.config({ path: '.env' });
+}
+
 const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
 
@@ -6,7 +15,7 @@ const mysql = require('mysql2/promise');
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD, 
+  password: process.env.DB_PASS,  // ✅ Cambiar de DB_PASSWORD a DB_PASS
   database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
