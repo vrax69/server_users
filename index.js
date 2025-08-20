@@ -26,6 +26,9 @@ console.log('DB_HOST:', process.env.DB_HOST);
 console.log('DB_NAME:', process.env.DB_NAME);
 console.log('DB_USER:', process.env.DB_USER);
 console.log('🛡️ DB_PASS cargado:', process.env.DB_PASS ? 'OK ✅' : '❌ NO DEFINIDO');
+console.log('🔑 JWT_SECRET cargado:', process.env.JWT_SECRET ? 'OK ✅' : '❌ NO DEFINIDO');
+console.log('🌐 FRONTEND_ORIGIN:', process.env.FRONTEND_ORIGIN);
+console.log('🚪 PORT:', process.env.PORT);
 
 // Middleware condicional para autenticación
 const requireAuth =
