@@ -1,4 +1,15 @@
-require('dotenv').config({ path: ['.env.local', '.env'] });
+const dotenv = require('dotenv');
+const fs = require('fs');
+
+// ✅ Cargar archivo .env.local si existe, si no usar .env
+if (fs.existsSync('.env.local')) {
+  dotenv.config({ path: '.env.local' });
+  console.log('📄 .env.local cargado');
+} else {
+  dotenv.config({ path: '.env' });
+  console.log('📄 .env cargado');
+}
+
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -7,14 +18,14 @@ const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
 
-// Debug de variables de entorno
+// Debug de variables de entorno mejorado
 console.log('🔧 Variables de entorno cargadas:');
 console.log('NODE_ENV:', process.env.NODE_ENV);
 console.log('SKIP_AUTH:', process.env.SKIP_AUTH);
 console.log('DB_HOST:', process.env.DB_HOST);
 console.log('DB_NAME:', process.env.DB_NAME);
 console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_PASS:', process.env.DB_PASS ? '***' : 'NO DEFINIDO');
+console.log('🛡️ DB_PASS cargado:', process.env.DB_PASS ? 'OK ✅' : '❌ NO DEFINIDO');
 
 // Middleware condicional para autenticación
 const requireAuth =
