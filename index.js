@@ -111,7 +111,7 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
 
     console.log('Total encontrado:', total);
 
-    // usuarios base (AHORA CON STATUS - incluir el campo status)
+    // usuarios base
     const [users] = await pool.query(
       `SELECT u.id, u.nombre, u.email, u.rol, u.centro, u.creado_en, u.status
        FROM usuarios u
@@ -127,7 +127,7 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
       return res.json({ usuarios: [], total });
     }
 
-    // proveedores (para construir las columnas)
+    // obtener todos los proveedores disponibles
     const providers = await getAllProviders(pool);
     const userIds = users.map(u => u.id);
 
@@ -153,7 +153,7 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
       accByUser.get(row.user_id).push(row);
     }
 
-    // construir salida: usuario base + columnas por proveedor
+    // construir salida: usuario base + proveedores anidados
     const usuariosOut = users.map(u => {
       const base = {
         id: u.id,
@@ -162,24 +162,25 @@ app.get('/api/usuarios', requireAuth, async (req, res) => {
         rol: u.rol,
         centro: u.centro,
         creado_en: u.creado_en,
-        STATUS_OF_AGENT: u.status  // ← 🔥 Usar el campo real de la tabla
+        status: u.status,  // 🔥 Campo status del usuario
+        proveedores: {}    // 🔥 Nuevo formato anidado
       };
 
-      // inicializa todas las columnas por proveedor
+      // inicializar todos los proveedores como null
       for (const p of providers) {
-        base[p.codigo] = null;
-        base[`${p.codigo}_STATUS`] = null;
-        base[`${p.codigo}_USERNAME`] = null;
-        base[`${p.codigo}_PASSWORD`] = null;
+        base.proveedores[p.codigo] = null;
       }
 
-      // rellena con lo que haya en cuentas
-      const rows = accByUser.get(u.id) || [];
-      for (const r of rows) {
-        base[r.codigo] = r.tpv_id || null;
-        base[`${r.codigo}_STATUS`] = r.status || null;
-        base[`${r.codigo}_USERNAME`] = r.tpv_username || null;
-        base[`${r.codigo}_PASSWORD`] = r.tpv_password || null;
+      // rellenar con las cuentas existentes
+      const userAccounts = accByUser.get(u.id) || [];
+      for (const account of userAccounts) {
+        base.proveedores[account.codigo] = {
+          tpv_id: account.tpv_id,
+          tpv_username: account.tpv_username,
+          tpv_password: account.tpv_password,
+          status: account.status,
+          updated_at: account.updated_at
+        };
       }
 
       return base;
@@ -223,15 +224,15 @@ app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
 
     const providers = await getAllProviders(pool);
 
-    const [rows] = await pool.query(
-      `SELECT p.codigo, a.tpv_id, a.tpv_username, a.tpv_password, a.status
+    const [accounts] = await pool.query(
+      `SELECT p.codigo, a.tpv_id, a.tpv_username, a.tpv_password, a.status, a.updated_at
        FROM user_provider_account a
        JOIN proveedores p ON p.id = a.provider_id
        WHERE a.user_id = ?`,
       [id]
     );
 
-    // arma salida pivot
+    // armar salida con proveedores anidados
     const out = {
       id: u.id,
       nombre: u.nombre,
@@ -239,21 +240,24 @@ app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
       rol: u.rol,
       centro: u.centro,
       creado_en: u.creado_en,
-      STATUS_OF_AGENT: u.status  // ← 🔥 Usar el campo real de la tabla
+      status: u.status,  // 🔥 Campo status del usuario
+      proveedores: {}    // 🔥 Nuevo formato anidado
     };
 
+    // inicializar todos los proveedores como null
     for (const p of providers) {
-      out[p.codigo] = null;
-      out[`${p.codigo}_STATUS`] = null;
-      out[`${p.codigo}_USERNAME`] = null;
-      out[`${p.codigo}_PASSWORD`] = null;
+      out.proveedores[p.codigo] = null;
     }
 
-    for (const r of rows) {
-      out[r.codigo] = r.tpv_id || null;
-      out[`${r.codigo}_STATUS`] = r.status || null;
-      out[`${r.codigo}_USERNAME`] = r.tpv_username || null;
-      out[`${r.codigo}_PASSWORD`] = r.tpv_password || null;
+    // rellenar con las cuentas existentes
+    for (const account of accounts) {
+      out.proveedores[account.codigo] = {
+        tpv_id: account.tpv_id,
+        tpv_username: account.tpv_username,
+        tpv_password: account.tpv_password,
+        status: account.status,
+        updated_at: account.updated_at
+      };
     }
 
     res.json(out);
@@ -268,8 +272,131 @@ app.get('/api/usuarios/:id', requireAuth, async (req, res) => {
   }
 });
 
+// POST - Crear nuevo usuario
+app.post('/api/usuarios', authMiddleware.verifyToken, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { nombre, email, rol, centro, password, status, proveedores } = req.body;
+    
+    console.log('POST /api/usuarios - Data:', req.body);
+    
+    // Validaciones básicas
+    if (!nombre || !email || !rol) {
+      return res.status(400).json({ error: 'Nombre, email y rol son obligatorios' });
+    }
+
+    await conn.beginTransaction();
+    
+    // 🔥 1. CREAR USUARIO (tabla usuarios)
+    const [result] = await conn.query(
+      `INSERT INTO usuarios (nombre, email, rol, centro, password, status, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [nombre, email, rol, centro || null, password || null, status || 'active']
+    );
+    
+    const userId = result.insertId;
+    console.log('✅ Usuario creado con ID:', userId);
+    
+    // 🔥 2. CREAR PROVEEDORES (tabla user_provider_account)
+    if (proveedores && typeof proveedores === 'object') {
+      console.log('🔧 Creando proveedores:', proveedores);
+      
+      for (const [codigo, provData] of Object.entries(proveedores)) {
+        if (!provData) continue; // Si es null, no crear
+        
+        // Obtener el provider_id por código
+        const [providerRows] = await conn.query(
+          'SELECT id FROM proveedores WHERE codigo = ?',
+          [codigo]
+        );
+        
+        if (providerRows.length === 0) {
+          console.warn(`⚠️ Proveedor ${codigo} no encontrado, saltando...`);
+          continue;
+        }
+        
+        const providerId = providerRows[0].id;
+        
+        // Insertar en user_provider_account
+        await conn.query(
+          `INSERT INTO user_provider_account
+            (user_id, provider_id, tpv_id, tpv_username, tpv_password, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [
+            userId,
+            providerId,
+            provData.tpv_id || null,
+            provData.tpv_username || null,
+            provData.tpv_password || null,
+            provData.status || null
+          ]
+        );
+        
+        console.log(`✅ Proveedor ${codigo} creado para usuario ${userId}`);
+      }
+    }
+    
+    await conn.commit();
+    
+    // Obtener el usuario creado completo
+    const [createdUser] = await conn.query(
+      `SELECT id, nombre, email, rol, centro, creado_en, status
+       FROM usuarios WHERE id = ?`,
+      [userId]
+    );
+    
+    // Obtener los proveedores creados
+    const providers = await getAllProviders(pool);
+    const [accounts] = await conn.query(
+      `SELECT p.codigo, a.tpv_id, a.tpv_username, a.tpv_password, a.status, a.updated_at
+       FROM user_provider_account a
+       JOIN proveedores p ON p.id = a.provider_id
+       WHERE a.user_id = ?`,
+      [userId]
+    );
+    
+    // Construir respuesta con formato nuevo
+    const usuario = createdUser[0];
+    usuario.proveedores = {};
+    
+    // inicializar todos los proveedores como null
+    for (const p of providers) {
+      usuario.proveedores[p.codigo] = null;
+    }
+    
+    // rellenar con las cuentas existentes
+    for (const account of accounts) {
+      usuario.proveedores[account.codigo] = {
+        tpv_id: account.tpv_id,
+        tpv_username: account.tpv_username,
+        tpv_password: account.tpv_password,
+        status: account.status,
+        updated_at: account.updated_at
+      };
+    }
+    
+    res.status(201).json({
+      ok: true,
+      message: 'Usuario creado exitosamente',
+      usuario: usuario
+    });
+    
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error en POST /api/usuarios:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      res.status(400).json({ error: 'El email ya está registrado' });
+    } else {
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  } finally {
+    conn.release();
+  }
+});
+
 // PUT - Actualizar usuario
 app.put('/api/usuarios/:id', authMiddleware.verifyToken, async (req, res) => {
+  const conn = await pool.getConnection();
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -286,70 +413,150 @@ app.put('/api/usuarios/:id', authMiddleware.verifyToken, async (req, res) => {
     if (existingUser.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
+
+    await conn.beginTransaction();
     
-    // Construir la consulta SQL dinámicamente
-    const fields = [];
-    const values = [];
+    // 🔥 1. ACTUALIZAR DATOS DEL USUARIO (tabla usuarios)
+    const userFields = [];
+    const userValues = [];
     
-    // Campos que se pueden actualizar
-    const allowedFields = [
-      'nombre', 'email', 'rol', 'centro', 'password', 
-      'STATUS_OF_AGENT', 'NEXT_VOLT', 'RUSHMORE', 'INDRA', 
-      'APGE', 'CLEANSKY', 'WGL', 'NGE', 'SPARK_AUTO', 
-      'SPARK_LIVE', 'ECOPLUS', 'creado_en'
-    ];
+    // Campos que pertenecen a la tabla usuarios
+    const allowedUserFields = ['nombre', 'email', 'rol', 'centro', 'password', 'status'];
     
-    // Iterar sobre los campos permitidos
-    allowedFields.forEach(field => {
+    allowedUserFields.forEach(field => {
       if (updateData.hasOwnProperty(field) && updateData[field] !== undefined) {
-        // Manejar campos con backticks
-        if (['STATUS_OF_AGENT', 'NEXT_VOLT', 'SPARK_AUTO', 'SPARK_LIVE'].includes(field)) {
-          fields.push(`\`${field}\` = ?`);
-        } else {
-          fields.push(`${field} = ?`);
-        }
-        values.push(updateData[field]);
+        userFields.push(`${field} = ?`);
+        userValues.push(updateData[field]);
       }
     });
     
-    if (fields.length === 0) {
-      return res.status(400).json({ error: 'No hay campos para actualizar' });
+    // Si hay campos de usuario para actualizar
+    if (userFields.length > 0) {
+      userValues.push(id); // Para la cláusula WHERE
+      const userQuery = `UPDATE usuarios SET ${userFields.join(', ')} WHERE id = ?`;
+      
+      console.log('🔧 Actualizando usuario - Query:', userQuery);
+      console.log('🔧 Actualizando usuario - Values:', userValues);
+      
+      await conn.query(userQuery, userValues);
     }
     
-    // Añadir el ID al final para la cláusula WHERE
-    values.push(id);
-    
-    // Construir la consulta
-    const query = `UPDATE usuarios SET ${fields.join(', ')} WHERE id = ?`;
-    
-    console.log('Query:', query);
-    console.log('Values:', values);
-    
-    // Ejecutar la consulta
-    const [result] = await pool.query(query, values);
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado o no se pudo actualizar' });
+    // 🔥 2. ACTUALIZAR PROVEEDORES (tabla user_provider_account)
+    if (updateData.proveedores && typeof updateData.proveedores === 'object') {
+      console.log('🔧 Actualizando proveedores:', updateData.proveedores);
+      
+      for (const [codigo, provData] of Object.entries(updateData.proveedores)) {
+        if (!provData) continue; // Si es null, no hacer nada
+        
+        // Obtener el provider_id por código
+        const [providerRows] = await conn.query(
+          'SELECT id FROM proveedores WHERE codigo = ?',
+          [codigo]
+        );
+        
+        if (providerRows.length === 0) {
+          console.warn(`⚠️ Proveedor ${codigo} no encontrado, saltando...`);
+          continue;
+        }
+        
+        const providerId = providerRows[0].id;
+        
+        // UPSERT en user_provider_account
+        const upsertSql = `
+          INSERT INTO user_provider_account
+            (user_id, provider_id, tpv_id, tpv_username, tpv_password, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+          ON DUPLICATE KEY UPDATE
+            tpv_id = VALUES(tpv_id),
+            tpv_username = VALUES(tpv_username),
+            tpv_password = VALUES(tpv_password),
+            status = VALUES(status),
+            updated_at = NOW()
+        `;
+        
+        await conn.query(upsertSql, [
+          id,
+          providerId,
+          provData.tpv_id || null,
+          provData.tpv_username || null,
+          provData.tpv_password || null,
+          provData.status || null
+        ]);
+        
+        console.log(`✅ Proveedor ${codigo} actualizado para usuario ${id}`);
+      }
     }
     
-    // Obtener el usuario actualizado
+    await conn.commit();
+    
+    // Obtener el usuario actualizado completo
     const [updatedUser] = await pool.query(
-      `SELECT id, nombre, email, rol, centro, creado_en,
-        \`STATUS_OF_AGENT\`, \`NEXT_VOLT\`, RUSHMORE, INDRA, APGE, CLEANSKY,
-        WGL, NGE, \`SPARK_AUTO\`, \`SPARK_LIVE\`, ECOPLUS
+      `SELECT id, nombre, email, rol, centro, creado_en, status
        FROM usuarios WHERE id = ?`,
       [id]
     );
     
+    // Obtener los proveedores actualizados
+    const providers = await getAllProviders(pool);
+    const [accounts] = await pool.query(
+      `SELECT p.codigo, a.tpv_id, a.tpv_username, a.tpv_password, a.status, a.updated_at
+       FROM user_provider_account a
+       JOIN proveedores p ON p.id = a.provider_id
+       WHERE a.user_id = ?`,
+      [id]
+    );
+    
+    // Construir respuesta con formato nuevo
+    const usuario = updatedUser[0];
+    usuario.proveedores = {};
+    
+    // inicializar todos los proveedores como null
+    for (const p of providers) {
+      usuario.proveedores[p.codigo] = null;
+    }
+    
+    // rellenar con las cuentas existentes
+    for (const account of accounts) {
+      usuario.proveedores[account.codigo] = {
+        tpv_id: account.tpv_id,
+        tpv_username: account.tpv_username,
+        tpv_password: account.tpv_password,
+        status: account.status,
+        updated_at: account.updated_at
+      };
+    }
+    
     res.json({
       ok: true,
       message: 'Usuario actualizado exitosamente',
-      usuario: updatedUser[0]
+      usuario: usuario
     });
     
   } catch (error) {
+    await conn.rollback();
     console.error('Error en PUT /api/usuarios/:id:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    conn.release();
+  }
+});
+
+// GET - Obtener todos los proveedores disponibles
+app.get('/api/proveedores', requireAuth, async (req, res) => {
+  try {
+    console.log('🔍 Obteniendo todos los proveedores');
+    
+    const [proveedores] = await pool.query(
+      'SELECT id, codigo, nombre FROM proveedores ORDER BY codigo'
+    );
+    
+    res.json({ proveedores });
+  } catch (error) {
+    console.error('❌ Error en GET /api/proveedores:', error);
+    res.status(500).json({ 
+      error: 'Error interno del servidor',
+      details: error.message 
+    });
   }
 });
 
