@@ -1,14 +1,8 @@
 const dotenv = require('dotenv');
 const fs = require('fs');
 
-// ✅ Cargar archivo .env.local si existe, si no usar .env
-if (fs.existsSync('.env.local')) {
-  dotenv.config({ path: '.env.local' });
-  console.log('📄 .env.local cargado');
-} else {
-  dotenv.config({ path: '.env' });
-  console.log('📄 .env cargado');
-}
+// ✅ Cargar .env
+dotenv.config();
 
 const express = require('express');
 const cors = require('cors');
@@ -18,24 +12,15 @@ const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
 
-// Debug de variables de entorno mejorado
+// Forzamos que el secreto esté disponible para el middleware
+if (!process.env.JWT_SECRET) {
+    process.env.JWT_SECRET = "Nwp"; 
+}
+
 console.log('🔧 Variables de entorno cargadas:');
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('SKIP_AUTH:', process.env.SKIP_AUTH);
 console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_NAME:', process.env.DB_NAME);
-console.log('DB_USER:', process.env.DB_USER);
-console.log('🛡️ DB_PASS cargado:', process.env.DB_PASS ? 'OK ✅' : '❌ NO DEFINIDO');
-console.log('🔑 JWT_SECRET cargado:', process.env.JWT_SECRET ? 'OK ✅' : '❌ NO DEFINIDO');
-console.log('🌐 FRONTEND_ORIGIN:', process.env.FRONTEND_ORIGIN);
-console.log('🚪 PORT:', process.env.PORT);
-
-// Middleware condicional para autenticación
-const requireAuth =
-  process.env.SKIP_AUTH === '1'
-    ? (_req, _res, next) => next()           // NO pide token (modo test)
-    : authMiddleware.verifyToken;            // modo normal
-
+console.log('🛡️ DB_PASSWORD:', process.env.DB_PASSWORD ? 'OK ✅' : '❌ NO DEFINIDO');
+console.log('🔑 JWT_SECRET:', process.env.JWT_SECRET ? 'OK ✅' : '❌ NO DEFINIDO');
 // 1. CORS
 app.use(cors({
   origin: process.env.FRONTEND_ORIGIN,
@@ -60,7 +45,7 @@ app.use((req, res, next) => {
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
-  password: process.env.DB_PASS,  // Cambiar de DB_PASSWORD a DB_PASS
+  password: process.env.DB_PASSWORD, // Asegúrate que diga PASSWORD y no PASS
   database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
@@ -723,7 +708,8 @@ app.put('/api/usuarios/:userId/providers/:code', requireAuth, async (req, res) =
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3004;
+
 app.listen(PORT, () => {
-  console.log(`API usuarios corriendo en http://localhost:${PORT}`);
+  console.log(`🚀 API usuarios corriendo en puerto ${PORT}`);
 });
