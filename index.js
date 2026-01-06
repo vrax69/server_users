@@ -9,7 +9,7 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const cookieParser = require('cookie-parser');
 const authMiddleware = require('./middleware/authMiddleware');
-
+const requireAuth = authMiddleware.verifyToken;
 const app = express();
 
 // Forzamos que el secreto esté disponible para el middleware
